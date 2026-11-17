@@ -198,6 +198,22 @@ static inline unsigned char ***ig_resolution(unsigned char ***img, int N, int M,
   return img;
 }
 
+int paste_image(unsigned char ***base_img, int N_base, int M_base, unsigned char ***paste_img, int N_paste, int M_paste, int x, int y)
+{
+  int start_i = (x > 0) ? x : 0;
+  int start_j = (y > 0) ? y : 0;
+  int end_i = (N_base < x + N_paste) ? N_base : (x + N_paste);
+  int end_j = (M_base < y + M_paste) ? M_base : (y + M_paste);
+  for(int i=start_i; i<end_i; i++)
+    for(int j=start_j; j<end_j; j++)
+    {
+      base_img[i][j][0] = paste_img[i-x][j-y][0];
+      base_img[i][j][1] = paste_img[i-x][j-y][1];
+      base_img[i][j][2] = paste_img[i-x][j-y][2];
+    }
+  return 1;
+}
+
 int main()
 {
   int N, M;
@@ -243,6 +259,20 @@ int main()
       img = ig_resolution(img, N, M, dif, 'M');
       bmp_write("output.bmp", img, N, M);
     }
+  }
+  else if(op==5)
+  {
+    int N_paste, M_paste;
+    unsigned char ***paste_img = bmp_read("images.bmp", &N_paste, &M_paste);
+    if (!paste_img)
+    {
+      printf("Error reading the image to paste!\n");
+      return 1;
+    }
+    int x, y;
+    scanf("%d %d", &x, &y);
+    paste_image(img, N, M, paste_img, N_paste, M_paste, x, y);
+    bmp_write("output.bmp", img, N, M);
   }
   else
   {
