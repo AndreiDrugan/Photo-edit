@@ -349,6 +349,103 @@ unsigned char ***rle_decode(char *input_path, int *N, int *M)
   return img;
 }
 
+void kmeans(unsigned char ***img, int N, int M, int K, int iterations)
+{
+  if(!img || !N || !M || !K)
+    return;
+  int total = N * M;
+
+  int centroids[16][3] = {
+        {0, 0, 0},
+        {255, 255, 255},
+        {255, 0, 0},
+        {0, 255, 0},
+        {0, 0, 255},
+        {255, 255, 0},
+        {0, 255, 255},
+        {255, 0, 255},
+        {128, 128, 128},
+        {192, 192, 192},
+        {64, 64, 64},
+        {128, 0, 0},
+        {128, 128, 0},
+        {0, 128, 0},
+        {128, 0, 128},
+        {255, 165, 0}
+    };
+  
+    int *labels = malloc(total * sizeof(int));
+    if(!labels)
+      return;
+    
+    while(iterations--)
+    {
+      long long sum_r[16]={0}, sum_g[16]={0}, sum_b[16]={0};
+      int ct[16]={0};
+
+      for(int i=0; i<N; i++)
+        for(int j=0; j<M; j++)
+          {
+            int r = img[i][j][0];
+            int g = img[i][j][1];
+            int b = img[i][j][2];
+
+            int best = 0;
+            long long min_dist = LLONG_MAX;
+            for(int c=0; c<K; c++)
+            {
+              long long dr = r - centroids[c][0];
+              long long dg = g - centroids[c][1];
+              long long db = b - centroids[c][2];
+              long long dist = dr * dr + dg * dg + db * db;
+
+              if(dist < min_dist)
+              {
+                min_dist = dist;
+                best = c;
+              }
+            }
+
+            labels[i * M + j] = best;
+            sum_r[best] += r;
+            sum_g[best] += g;
+            sum_b[best] += b;
+            ct[best] ++;
+          }
+
+          int changed = 0;
+          for(int c=0; c<K; c++)
+          {
+            if(ct[c] > 0)
+            {
+              int new_r = (int)(sum_r[c] / ct[c]);
+              int new_g = (int)(sum_g[c] / ct[c]);
+              int new_b = (int)(sum_b[c] / ct[c]);
+
+              if(new_r != centroids[c][0] || new_g != centroids[c][1] || new_b != centroids[c][2])
+              {
+                centroids[c][0] = new_r;
+                centroids[c][1] = new_g;
+                centroids[c][2] = new_b;
+                changed = 1;
+              }
+            }
+          }
+          if(!changed)
+            break;
+    }
+
+    for(int i=0; i<N; i++)
+      for(int j=0; j<M; j++)
+        {
+          int c = labels[i * M + j];
+          img[i][j][0] = (unsigned char)centroids[c][0];
+          img[i][j][1] = (unsigned char)centroids[c][1];
+          img[i][j][2] = (unsigned char)centroids[c][2];
+        }
+    free(labels);
+}
+
 int main()
 {
   int N, M;
@@ -515,6 +612,14 @@ int main()
         unsigned char ***decoded_img = rle_decode(path, &N_decode, &M_decode);
         if(decoded_img)
           load_image(images, &ct, tag, decoded_img, N_decode, M_decode);
+      }
+      else if(strcmp(command, "KMEANS") == 0)
+      {
+        char tag[100];
+        fscanf(f, "%s", tag);
+        int idx = find_image(images, ct, tag);
+        if(idx != -1)
+          kmeans(images[idx].img, images[idx].N, images[idx].M, 16, 100);
       }
     }
     for(int i=0; i<ct; i++)
