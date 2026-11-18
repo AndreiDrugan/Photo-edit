@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <limits.h>
+#include <string.h>
 
 #define BMP_GET32(p) ((uint32_t)(p)[0] | (uint32_t)(p)[1]<<8 | (uint32_t)(p)[2]<<16 | (uint32_t)(p)[3]<<24)
 #define BMP_PUT32(p,v) do { uint32_t bmp_v_ = (uint32_t)(v); for(int bmp_k_=0; bmp_k_<4; ++bmp_k_) (p)[bmp_k_] = (unsigned char)(bmp_v_ >> (8*bmp_k_)); } while(0)
@@ -64,7 +65,27 @@ static inline int bmp_write(const char *path, unsigned char ***img, int N, int M
     free(buf); return ok;
 }
 
-static inline unsigned char ***bounding_box(unsigned char ***img, int N, int M, int *x1, int *y1, int *x2, int *y2)
+typedef struct {
+  char name[100];
+  unsigned char ***img;
+  int N;
+  int M;
+} Image;
+
+void free_image(unsigned char ***image, int N, int M)
+{
+  if(!image)
+    return;
+  for(int i=0; i<N; i++)
+  {
+    for(int j=0; j<M; j++)
+      free(image[i][j]);
+    free(image[i]);
+  }
+  free(image);
+}
+
+static inline unsigned char ***bounding_box(unsigned char ***img, int N, int M, int *x1, int *y1, int *x2, int *y2, int R, int G, int B)
 {
     int min_x = (*x1 < *x2) ? *x1 : *x2;
     int max_x = (*x1 > *x2) ? *x1 : *x2;
@@ -78,24 +99,24 @@ static inline unsigned char ***bounding_box(unsigned char ***img, int N, int M, 
 
     for (int x = min_x; x <= max_x; x++)
     {
-        img[min_y][x][0] = 255;
-        img[min_y][x][1] = 0;
-        img[min_y][x][2] = 0;
+        img[min_y][x][0] = R;
+        img[min_y][x][1] = G;
+        img[min_y][x][2] = B;
 
-        img[max_y][x][0] = 255;
-        img[max_y][x][1] = 0;
-        img[max_y][x][2] = 0;
+        img[max_y][x][0] = R;
+        img[max_y][x][1] = G;
+        img[max_y][x][2] = B;
     }
 
     for (int y = min_y; y <= max_y; y++)
     {
-        img[y][min_x][0] = 255;
-        img[y][min_x][1] = 0;
-        img[y][min_x][2] = 0;
+        img[y][min_x][0] = R;
+        img[y][min_x][1] = G;
+        img[y][min_x][2] = B;
 
-        img[y][max_x][0] = 255;
-        img[y][max_x][1] = 0;
-        img[y][max_x][2] = 0;
+        img[y][max_x][0] = R;
+        img[y][max_x][1] = G;
+        img[y][max_x][2] = B;
     }
 
     return img;
@@ -214,6 +235,120 @@ int paste_image(unsigned char ***base_img, int N_base, int M_base, unsigned char
   return 1;
 }
 
+unsigned char ***create_image(int N, int M)
+{
+  unsigned char ***img = malloc(N*sizeof(unsigned char **));
+  for(int i=0; i<N; i++)
+  {
+    img[i] = malloc(M*sizeof(unsigned char *));
+    for(int j=0; j<M; j++)
+      img[i][j] = malloc(3*sizeof(unsigned char));
+  }
+  return img;
+}
+
+void clear_image(unsigned char ***img, int N, int M, int R, int G, int B)
+{
+  for(int i=0; i<N; i++)
+    for(int j=0; j<M; j++)
+    {
+      img[i][j][0] = R;
+      img[i][j][1] = G;
+      img[i][j][2] = B;
+    }
+}
+
+int find_image(Image *v, int ct, char *name)
+{
+  for(int i=0; i<ct; i++)
+    if(strcmp(v[i].name, name) == 0)
+      return i;
+  return -1;
+}
+
+void load_image(Image *v, int *ct, char *name, unsigned char ***img, int N, int M)
+{
+  int idx = find_image(v, *ct, name);
+  if(idx != -1)
+  {
+    free_image(v[idx].img, v[idx].N, v[idx].M);
+    v[idx].img = img;
+    v[idx].N = N;
+    v[idx].M = M;
+  }
+  else
+  {
+    strcpy(v[*ct].name, name);
+    v[*ct].img = img;
+    v[*ct].N = N;
+    v[*ct].M = M;
+    (*ct)++;
+  }
+}
+
+int rle_encode(unsigned char ***img, int N, int M, char *output_path)
+{
+  if(!output_path || !img || N <= 0 || M <= 0)
+    return 0;
+  FILE *f = fopen(output_path, "wb");
+  if(!f)
+    return 0;
+  int current_r = img[0][0][0];
+  int current_g = img[0][0][1];
+  int current_b = img[0][0][2];
+  int ct=0;
+
+  for(int i=0; i<N; i++)
+  {
+    for(int j=0; j<M; j++)
+      {
+        if(img[i][j][0] == current_r && img[i][j][1] == current_g && img[i][j][2] == current_b)
+          ct++;
+        else
+        {
+          fwrite(&ct, sizeof(int), 1, f);
+          fwrite(&current_r, sizeof(unsigned char), 1, f);
+          fwrite(&current_g, sizeof(unsigned char), 1, f);
+          fwrite(&current_b, sizeof(unsigned char), 1, f);
+          current_r = img[i][j][0];
+          current_g = img[i][j][1];
+          current_b = img[i][j][2];
+          ct = 1;
+        }
+      }
+  }
+  fclose(f);
+  return 1;
+}
+
+unsigned char ***rle_decode(char *input_path, int *N, int *M)
+{
+  if(!input_path || !N || !M)
+    return NULL;
+  FILE *f = fopen(input_path, "rb");
+  if(!f)
+    return NULL;
+  int total = (*N) * (*M);
+  unsigned char ***img = malloc((*N) * sizeof(unsigned char **));
+  int ct=0;
+  int filled=0;
+  unsigned char rgb[3];
+  while(filled < total && fread(rgb, sizeof(unsigned char), 3, f) == 3 && fread(&ct, sizeof(int), 1, f) == 1)
+  {
+    for(int i=0; i<ct && filled < total; i++)
+    {
+      int poz_i = filled / (*M);
+      int poz_j = filled % (*M);
+      img[poz_i][poz_j][0] = rgb[0];
+      img[poz_i][poz_j][1] = rgb[1];
+      img[poz_i][poz_j][2] = rgb[2];
+      filled++;
+    }
+  }
+  fclose(f);
+  return img;
+}
+
 int main()
 {
   int N, M;
@@ -228,7 +363,7 @@ int main()
   {
     int x1, y1, x2, y2;
     scanf("%d %d %d %d", &x1, &y1, &x2, &y2);
-    img = bounding_box(img, N, M, &x1, &y1, &x2, &y2);
+    img = bounding_box(img, N, M, &x1, &y1, &x2, &y2, 255, 0, 0);
     bmp_write("output.bmp", img, N, M);
   }
   else if(op==2)
@@ -273,6 +408,123 @@ int main()
     scanf("%d %d", &x, &y);
     paste_image(img, N, M, paste_img, N_paste, M_paste, x, y);
     bmp_write("output.bmp", img, N, M);
+  }
+  else if(op==6)
+  {
+    FILE *f = fopen("command.txt", "r");
+    if(!f)
+    {
+      printf("Error opening command.txt\n");
+      return 1;
+    }
+    Image images[100];
+    int ct=0;
+    char command[20];
+    while(fscanf(f, "%s", command) == 1)
+    {
+      if(strcmp(command, "CREATE") == 0)
+      {
+        char tag[100];
+        int N_create, M_create;
+        fscanf(f, "%s %d %d", tag, &M_create, &N_create);
+        unsigned char ***new_img = create_image(N_create, M_create);
+        load_image(images, &ct, tag, new_img, N_create, M_create);
+      }
+      else if(strcmp(command, "CLEAR") == 0)
+      {
+        char tag[100];
+        int R, G, B;
+        fscanf(f, "%s %d %d %d", tag, &R, &G, &B);
+        int idx = find_image(images, ct, tag);
+        if(idx != -1)
+          clear_image(images[idx].img, images[idx].N, images[idx].M, R, G, B);
+      }
+      else if(strcmp(command, "LOAD") == 0)
+      {
+        char tag[100], path[100];
+        fscanf(f, "%s %s", tag, path);
+        int N_load, M_load;
+        unsigned char ***loaded_img = bmp_read(path, &N_load, &M_load);
+        if(loaded_img)
+          load_image(images, &ct, tag, loaded_img, N_load, M_load);
+      }
+      else if(strcmp(command, "PASTE") == 0)
+      {
+        char tag_base[100], tag_paste[100];
+        int x, y;
+        fscanf(f, "%s %s %d %d", tag_base, tag_paste, &x, &y);
+        int dest = find_image(images, ct, tag_base);
+        int src = find_image(images, ct, tag_paste);
+        if(dest != -1 && src != -1)
+          paste_image(images[dest].img, images[dest].N, images[dest].M, images[src].img, images[src].N, images[src].M, y, x);
+      }
+      else if(strcmp(command, "RECTANGLE") == 0)
+      {
+        char tag[100];
+        int x1, y1, x2, y2, R, G, B;
+        fscanf(f, "%s %d %d %d %d %d %d %d", tag, &x1, &y1, &x2, &y2, &R, &G, &B);
+        int idx = find_image(images, ct, tag);
+        if(idx != -1)
+          images[idx].img = bounding_box(images[idx].img, images[idx].N, images[idx].M, &x1, &y1, &x2, &y2, R, G, B);
+      }
+      else if(strcmp(command, "CROP") == 0)
+      {
+         char tag[100];
+         int x1, y1, x2, y2;
+         fscanf(f, "%s %d %d %d %d", tag, &x1, &y1, &x2, &y2);
+        int idx = find_image(images, ct, tag);
+        if(idx != -1)
+          images[idx].img = crop(images[idx].img, &images[idx].N, &images[idx].M, &x1, &y1, &x2, &y2);
+      }
+      else if(strcmp(command, "GRAYSCALE") == 0)
+      {
+        char tag[100];
+        fscanf(f, "%s", tag);
+        int idx = find_image(images, ct, tag);
+        if(idx != -1)
+          images[idx].img = filter(images[idx].img, images[idx].N, images[idx].M);
+      }
+      else if(strcmp(command, "SQUARE") == 0)
+      {
+        char tag[100];
+        int idx = find_image(images, ct, tag);
+        if(idx != -1)
+          images[idx].img = ig_resolution(images[idx].img, images[idx].N, images[idx].M, abs(images[idx].N - images[idx].M), (images[idx].N > images[idx].M) ? 'N' : 'M');
+      }
+      else if(strcmp(command, "SAVE") == 0)
+      {
+        char tag[100], path[100];
+        fscanf(f, "%s %s", tag, path);
+        int idx = find_image(images, ct, tag);
+        if(idx != -1)
+          bmp_write(path, images[idx].img, images[idx].N, images[idx].M);
+      }
+      else if(strcmp(command, "ENCODE") == 0)
+      {
+        char tag[100], path[100];
+        fscanf(f, "%s %s", tag, path);
+        int idx = find_image(images, ct, tag);
+        if(idx != -1)
+          rle_encode(images[idx].img, images[idx].N, images[idx].M, path);
+      }
+      else if(strcmp(command, "DECODE") == 0)
+      {
+        char tag[100], path[100];
+        int N_decode, M_decode;
+        fscanf(f, "%s %s %d %d", tag, path, &M_decode, &N_decode);
+        unsigned char ***decoded_img = rle_decode(path, &N_decode, &M_decode);
+        if(decoded_img)
+          load_image(images, &ct, tag, decoded_img, N_decode, M_decode);
+      }
+    }
+    for(int i=0; i<ct; i++)
+    {
+      char output[150];
+      snprintf(output, sizeof(output), "%s.bmp", images[i].name);
+      bmp_write(output, images[i].img, images[i].N, images[i].M);
+      free_image(images[i].img, images[i].N, images[i].M);
+    }
+    fclose(f);
   }
   else
   {
